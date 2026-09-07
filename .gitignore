@@ -1,0 +1,44 @@
+# ===== 构建 / 缓存 =====
+dist_*/
+build_*/
+__pycache__/
+*.pyc
+*.log
+_trash/
+
+# ===== 安卓构建产物 =====
+android-app/app/build/
+android-app/.gradle/
+android-app/local.properties
+
+# ===== 二进制交付物（通过网盘 / GitHub Release 分发，不进 git） =====
+*.apk
+*.exe
+*.zip
+
+# ===== 图片资源（由 PDF 渲染生成，体积大，不进 git） =====
+pages_mob/
+pages/
+android-app/app/src/main/assets/pages_mob/
+
+# ===== 保留源码数据 =====
+!words.js
+
+# ===== PyInstaller 构建 / 解压目录（运行时产物，不进 git） =====
+build/
+dist/
+VisualDict-app/
+VisualDict-SingleFile/
+
+# ===== 临时文件 =====
+_mem*.py
+
+# ===== 签名密钥（绝不进 git） =====
+*.jks
+*.keystore
+android-app/app/keystore/
+
+# ===== API 缓存 / 测试产物 =====
+ipa_api_cache.json
+cards-data/ipa_api_cache.json
+test_render/
