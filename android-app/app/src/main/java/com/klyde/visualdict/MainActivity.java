@@ -25,6 +25,9 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -46,6 +49,8 @@ public class MainActivity extends Activity {
     private TtsBridge ttsBridge;
     // 当前实际选用的语音引擎包名（优先讯飞，回退系统默认），用于提示用户
     private volatile String activeEngineName = "系统默认";
+    // TTS 诊断信息（已检测到的引擎列表），供网页展示，辅助排查“缺什么”
+    private volatile String ttsDiag = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -117,23 +122,66 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 初始化原生 TTS：按优先级尝试 讯飞引擎(com.iflytek.speechcloud / com.iflytek.tts) → 系统默认。
-     * 第一个“能初始化且支持英文(Locale.US)”的引擎被选用；若都没有英文音库，则保留第一个可用的引擎
-     * （优先讯飞）并标记 needInstall，由网页/Toast 引导用户安装 English 语音数据。
+     * 初始化原生 TTS：先枚举设备里所有已装的语音引擎，按“讯飞优先 → 其余 → 系统默认”的顺序逐个尝试，
+     * 选第一个“能初始化且支持英文(Locale.US)”的引擎；全部不支持英文时，保留最后一个可用引擎并标记
+     * needInstall，由网页/Toast 引导用户去该引擎App内下载 English 语音，或安装 eSpeak TTS 等离线引擎。
      */
     private void initTts() {
-        final String[] ENGINES = {"com.iflytek.speechcloud", "com.iflytek.tts", null};
-        initTtsRecursive(ENGINES, 0, null);
+        // 用一个临时实例枚举已装引擎（getEngines() 需在初始化成功后调用）
+        final TextToSpeech[] probeHolder = new TextToSpeech[1];
+        probeHolder[0] = new TextToSpeech(this, status -> {
+            TextToSpeech probe = probeHolder[0];
+            List<String> pkgs = new ArrayList<>();
+            List<String> labels = new ArrayList<>();
+            if (status == TextToSpeech.SUCCESS) {
+                try {
+                    for (TextToSpeech.EngineInfo e : probe.getEngines()) {
+                        pkgs.add(e.name);
+                        labels.add(e.label != null ? e.label : e.name);
+                    }
+                } catch (Exception ignore) {}
+            }
+            try { probe.shutdown(); } catch (Exception ignore) {}
+            // 讯飞相关引擎排到最前，其余保持枚举顺序
+            List<String> ordered = new ArrayList<>(pkgs);
+            Collections.sort(ordered, (a, b) -> {
+                boolean ai = a != null && a.contains("iflytek");
+                boolean bi = b != null && b.contains("iflytek");
+                if (ai == bi) return 0;
+                return ai ? -1 : 1;
+            });
+            ordered.add(null); // 系统默认引擎兜底
+            // 记录诊断：已检测到哪些引擎
+            StringBuilder sb = new StringBuilder();
+            sb.append("已检测到 ").append(pkgs.size()).append(" 个语音引擎");
+            if (!pkgs.isEmpty()) {
+                sb.append("（");
+                for (int i = 0; i < labels.size(); i++) {
+                    if (i > 0) sb.append("、");
+                    sb.append(labels.get(i));
+                }
+                sb.append("）");
+            }
+            ttsDiag = sb.toString();
+            initTtsRecursive(ordered.toArray(new String[0]), 0, null);
+        });
     }
 
     private void initTtsRecursive(final String[] engines, final int idx, final TextToSpeech prev) {
         if (idx >= engines.length) {
-            // 所有引擎尝试完毕：保留最后一个可用的引擎（优先讯飞）作为候选，提示安装英文音库
+            // 所有引擎尝试完毕：保留最后一个可用的引擎作为候选，提示安装英文音库
             ttsReady = false;
+            tts = prev; // 保留实例，便于用户安装语音后重试（speak 会提示“语音包未安装”而非“未就绪”）
             activeEngineName = (prev != null) ? describeEngine(prev) : "无";
-            runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                    "未检测到可用的英语语音：请在系统“文字转语音(TTS)输出”中选择讯飞或 Google 引擎，并安装 English 语音数据",
-                    Toast.LENGTH_LONG).show());
+            if (prev != null) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "语音引擎已安装但缺少 English 语音数据：请打开该引擎 App（如讯飞语记）下载 English(US) 语音，或在系统“文字转语音输出”里改选其它引擎",
+                        Toast.LENGTH_LONG).show());
+            } else {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "未检测到任何 TTS 引擎：请安装 eSpeak TTS 或 Google 文字转语音引擎后再试",
+                        Toast.LENGTH_LONG).show());
+            }
             return;
         }
         final String pkg = engines[idx];
@@ -192,6 +240,12 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String engineName() {
             return activeEngineName;
+        }
+
+        /** 设备已检测到的语音引擎列表（用于排查“缺什么”）。 */
+        @JavascriptInterface
+        public String diag() {
+            return ttsDiag;
         }
 
         /** 跳转到系统 TTS / 语音数据安装设置页（尽最大努力）。 */

@@ -586,14 +586,20 @@
   function showTtsHint(){
     if (window.__ttsHintShown) return;
     window.__ttsHintShown = true;
+    var diag = (window.AndroidTTS && typeof window.AndroidTTS.diag === 'function') ? window.AndroidTTS.diag() : '';
+    var eng = (window.AndroidTTS && typeof window.AndroidTTS.engineName === 'function') ? window.AndroidTTS.engineName() : '';
+    var msg = '英语发音不可用';
+    if (diag) msg += '：' + diag + '，但都缺少 English 语音数据';
+    else msg += '：未检测到系统 TTS 引擎，请安装 eSpeak TTS 或 Google 文字转语音引擎';
+    msg += '（当前引擎：' + (eng || '无') + '）';
     var bar = document.createElement('div');
     bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#c0392b;color:#fff;padding:10px 14px;font-size:14px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 -2px 8px rgba(0,0,0,.25)';
-    var span = document.createElement('span'); span.textContent = '发音不可用：请在系统“文字转语音(TTS)输出”选讯飞/Google 引擎并安装 English 语音数据';
+    var span = document.createElement('span'); span.textContent = msg;
     var btn = document.createElement('button'); btn.textContent = '去安装';
     btn.style.cssText = 'margin-left:10px;border:none;background:#fff;color:#c0392b;padding:6px 12px;border-radius:6px;font-weight:bold';
     btn.onclick = function(){ if (window.AndroidTTS && typeof window.AndroidTTS.openSettings === 'function') window.AndroidTTS.openSettings(); };
     bar.appendChild(span); bar.appendChild(btn); document.body.appendChild(bar);
-    setTimeout(function(){ if (bar && bar.parentNode){ bar.parentNode.removeChild(bar); window.__ttsHintShown = false; } }, 8000);
+    setTimeout(function(){ if (bar && bar.parentNode){ bar.parentNode.removeChild(bar); window.__ttsHintShown = false; } }, 10000);
   }
   function speak(en){
     if (window.AndroidTTS && typeof window.AndroidTTS.speak === 'function') {
