@@ -43,6 +43,9 @@ public class MainActivity extends Activity {
     // 原生 TTS 引擎（离线发音用，WebView 的 Web Speech API 多数真机不支持）
     private TextToSpeech tts;
     private volatile boolean ttsReady = false;
+    private TtsBridge ttsBridge;
+    // 当前实际选用的语音引擎包名（优先讯飞，回退系统默认），用于提示用户
+    private volatile String activeEngineName = "系统默认";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,29 +92,11 @@ public class MainActivity extends Activity {
 
         // 原生 TTS 桥：把 Android 系统 TextToSpeech 暴露给网页 JS，离线发音。
         // WebView 的 speechSynthesis 多数真机不可用，故优先走原生引擎。
-        final TtsBridge ttsBridge = new TtsBridge();
-        tts = new TextToSpeech(this, new TextToSpeech.OnInitListener() {
-            @Override
-            public void onInit(int status) {
-                if (status != TextToSpeech.SUCCESS) {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                            "语音引擎初始化失败，发音不可用", Toast.LENGTH_LONG).show());
-                    return;
-                }
-                int r = tts.setLanguage(Locale.US);
-                if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    // 设备未安装英语语音数据：明确提示用户，并提供跳转安装入口。
-                    ttsReady = false;
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                            "未安装英语语音包：设置→语言和输入法→文字转语音(TTS)输出→安装语音数据(English)",
-                            Toast.LENGTH_LONG).show());
-                } else {
-                    ttsReady = true;
-                    ttsBridge.flushPending();
-                }
-            }
-        });
+        // 优先选用设备已装的【讯飞语音引擎】(com.iflytek.speechcloud / com.iflytek.tts)，
+        // 国行平板通常自带且无需 GMS；找不到或该引擎无英文音库时回退系统默认引擎。
+        ttsBridge = new TtsBridge();
         webView.addJavascriptInterface(ttsBridge, "AndroidTTS");
+        initTts();
 
         // 【核心修复】先开 file://，保证 App 一定能进首页；后续页面通过相对路径（index2.html /
         // search.html / pages_mob/*.jpg）都能在 file:// 下正常解析，完全离线可用。
@@ -131,6 +116,63 @@ public class MainActivity extends Activity {
         if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
     }
 
+    /**
+     * 初始化原生 TTS：按优先级尝试 讯飞引擎(com.iflytek.speechcloud / com.iflytek.tts) → 系统默认。
+     * 第一个“能初始化且支持英文(Locale.US)”的引擎被选用；若都没有英文音库，则保留第一个可用的引擎
+     * （优先讯飞）并标记 needInstall，由网页/Toast 引导用户安装 English 语音数据。
+     */
+    private void initTts() {
+        final String[] ENGINES = {"com.iflytek.speechcloud", "com.iflytek.tts", null};
+        initTtsRecursive(ENGINES, 0, null);
+    }
+
+    private void initTtsRecursive(final String[] engines, final int idx, final TextToSpeech prev) {
+        if (idx >= engines.length) {
+            // 所有引擎尝试完毕：保留最后一个可用的引擎（优先讯飞）作为候选，提示安装英文音库
+            ttsReady = false;
+            activeEngineName = (prev != null) ? describeEngine(prev) : "无";
+            runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                    "未检测到可用的英语语音：请在系统“文字转语音(TTS)输出”中选择讯飞或 Google 引擎，并安装 English 语音数据",
+                    Toast.LENGTH_LONG).show());
+            return;
+        }
+        final String pkg = engines[idx];
+        // 用数组持有实例，规避“lambda 在构造期间可能捕获到尚未赋值的局部变量 t”的编译错误
+        final TextToSpeech[] holder = new TextToSpeech[1];
+        holder[0] = new TextToSpeech(this, status -> {
+            TextToSpeech t = holder[0];
+            if (status != TextToSpeech.SUCCESS) {
+                // 该引擎未安装：丢弃并尝试下一个（保留之前可用的回退引擎）
+                if (prev != null && prev != t) prev.shutdown();
+                initTtsRecursive(engines, idx + 1, prev);
+                return;
+            }
+            int r = t.setLanguage(Locale.US);
+            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                // 引擎可用但不含英文音库：保留为候选，继续尝试下一个（也许下一个自带英文）
+                if (prev != null && prev != t) prev.shutdown();
+                initTtsRecursive(engines, idx + 1, t);
+                return;
+            }
+            // 该引擎支持英文发音：正式选用它
+            if (prev != null && prev != t) prev.shutdown();
+            tts = t;
+            ttsReady = true;
+            activeEngineName = (pkg == null) ? "系统默认" : pkg;
+            ttsBridge.flushPending();
+        }, pkg);
+    }
+
+    private String describeEngine(TextToSpeech t) {
+        try {
+            if (t != null) {
+                String n = t.getDefaultEngine();
+                if (n != null && !n.isEmpty()) return n;
+            }
+        } catch (Exception ignore) {}
+        return "系统默认";
+    }
+
     /** 暴露给 JS 的原生 TTS 桥。JS 调用 AndroidTTS.speak("word") 即触发系统离线语音。 */
     class TtsBridge {
         private final Queue<String> pending = new ConcurrentLinkedQueue<>();
@@ -146,9 +188,16 @@ public class MainActivity extends Activity {
             return tts != null && !ttsReady;
         }
 
+        /** 当前选用的语音引擎包名（如 com.iflytek.speechcloud / 系统默认），供网页展示。 */
+        @JavascriptInterface
+        public String engineName() {
+            return activeEngineName;
+        }
+
         /** 跳转到系统 TTS / 语音数据安装设置页（尽最大努力）。 */
         @JavascriptInterface
         public void openSettings() {
+            // 优先打开“安装语音数据”页（针对当前默认引擎）；若无法解析则退回系统设置。
             Intent i = new Intent(TTS_INSTALL_ACTION);
             if (i.resolveActivity(getPackageManager()) == null) {
                 i = new Intent(Settings.ACTION_SETTINGS);

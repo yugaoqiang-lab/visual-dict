@@ -116,7 +116,7 @@ function showTtsHint(){
   window.__ttsHintShown = true;
   var bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#c0392b;color:#fff;padding:10px 14px;font-size:14px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 -2px 8px rgba(0,0,0,.25)';
-  var span = document.createElement('span'); span.textContent = '未安装英语语音包，点“去安装”后重试';
+  var span = document.createElement('span'); span.textContent = '发音不可用：请在系统“文字转语音(TTS)输出”选讯飞/Google 引擎并安装 English 语音数据';
   var btn = document.createElement('button'); btn.textContent = '去安装';
   btn.style.cssText = 'margin-left:10px;border:none;background:#fff;color:#c0392b;padding:6px 12px;border-radius:6px;font-weight:bold';
   btn.onclick = function(){ if (window.AndroidTTS && typeof window.AndroidTTS.openSettings === 'function') window.AndroidTTS.openSettings(); };
