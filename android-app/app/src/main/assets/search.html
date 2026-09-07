@@ -583,9 +583,21 @@
   function saveFavs(){ try{ localStorage.setItem('vd_favs', JSON.stringify([...favs])); }catch(e){} }
   function toggleFav(en, btn){ if(favs.has(en)){ favs.delete(en); if(setmap[en]){ delete setmap[en]; saveSetmap(); } } else favs.add(en); saveFavs(); if(btn) btn.textContent=favs.has(en)?'★':'☆'; if(mode==='fav') render(); }
   function setMode(m){ mode=m; mAll.classList.toggle('on', m==='all'); mFav.classList.toggle('on', m==='fav'); if(mList) mList.classList.toggle('on', m==='list'); if(m!=='fav') setFilter=null; if(m==='list') listPage=1; render(); }
+  function showTtsHint(){
+    if (window.__ttsHintShown) return;
+    window.__ttsHintShown = true;
+    var bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#c0392b;color:#fff;padding:10px 14px;font-size:14px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 -2px 8px rgba(0,0,0,.25)';
+    var span = document.createElement('span'); span.textContent = '未安装英语语音包，点“去安装”后重试';
+    var btn = document.createElement('button'); btn.textContent = '去安装';
+    btn.style.cssText = 'margin-left:10px;border:none;background:#fff;color:#c0392b;padding:6px 12px;border-radius:6px;font-weight:bold';
+    btn.onclick = function(){ if (window.AndroidTTS && typeof window.AndroidTTS.openSettings === 'function') window.AndroidTTS.openSettings(); };
+    bar.appendChild(span); bar.appendChild(btn); document.body.appendChild(bar);
+    setTimeout(function(){ if (bar && bar.parentNode){ bar.parentNode.removeChild(bar); window.__ttsHintShown = false; } }, 8000);
+  }
   function speak(en){
     if (window.AndroidTTS && typeof window.AndroidTTS.speak === 'function') {
-      try { window.AndroidTTS.speak(String(en)); return; } catch(e){}
+      try { window.AndroidTTS.speak(String(en)); if (window.AndroidTTS.needInstall && window.AndroidTTS.needInstall()) showTtsHint(); return; } catch(e){}
     }
     try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(en); u.lang='en-US'; u.rate=0.92; speechSynthesis.speak(u);}catch(e){}
   }

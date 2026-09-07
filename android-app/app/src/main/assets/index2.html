@@ -111,10 +111,22 @@ const toastEl = document.getElementById('toast');
 let voices = [];
 function loadVoices(){ voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; }
 if (window.speechSynthesis) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+function showTtsHint(){
+  if (window.__ttsHintShown) return;
+  window.__ttsHintShown = true;
+  var bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#c0392b;color:#fff;padding:10px 14px;font-size:14px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 -2px 8px rgba(0,0,0,.25)';
+  var span = document.createElement('span'); span.textContent = '未安装英语语音包，点“去安装”后重试';
+  var btn = document.createElement('button'); btn.textContent = '去安装';
+  btn.style.cssText = 'margin-left:10px;border:none;background:#fff;color:#c0392b;padding:6px 12px;border-radius:6px;font-weight:bold';
+  btn.onclick = function(){ if (window.AndroidTTS && typeof window.AndroidTTS.openSettings === 'function') window.AndroidTTS.openSettings(); };
+  bar.appendChild(span); bar.appendChild(btn); document.body.appendChild(bar);
+  setTimeout(function(){ if (bar && bar.parentNode){ bar.parentNode.removeChild(bar); window.__ttsHintShown = false; } }, 8000);
+}
 function speak(text){
   // 优先用原生安卓 TTS 桥：WebView 的 Web Speech API 多数真机不可用，原生 TTS 离线可用
   if (window.AndroidTTS && typeof window.AndroidTTS.speak === 'function') {
-    try { window.AndroidTTS.speak(String(text)); return; } catch(e){}
+    try { window.AndroidTTS.speak(String(text)); if (window.AndroidTTS.needInstall && window.AndroidTTS.needInstall()) showTtsHint(); return; } catch(e){}
   }
   if (!window.speechSynthesis) { toast('当前设备未启用语音播报'); return; }
   speechSynthesis.cancel();

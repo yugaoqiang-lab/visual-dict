@@ -1,8 +1,11 @@
 package com.klyde.visualdict;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
+import android.widget.Toast;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -32,6 +35,9 @@ public class MainActivity extends Activity {
     private static final String BASE_URL = "http://127.0.0.1:" + PORT + "/";
     // 【关键】永远用 file:///android_asset/ 打开：不依赖任何本地服务器/网络，100% 能开。
     private static final String FILE_URL = "file:///android_asset/home.html";
+    // 安装 TTS 语音数据的系统广播 action（等价于 TextToSpeech.Engine.ACTION_TTS_DATA_INSTALL，
+    // 但用字面量避免部分编译环境下该常量不可见导致编译失败）
+    private static final String TTS_INSTALL_ACTION = "android.speech.tts.engine.INSTALL_TTS_DATA";
     private WebView webView;
     private AssetServer server;
     // 原生 TTS 引擎（离线发音用，WebView 的 Web Speech API 多数真机不支持）
@@ -87,19 +93,21 @@ public class MainActivity extends Activity {
         tts = new TextToSpeech(this, new TextToSpeech.OnInitListener() {
             @Override
             public void onInit(int status) {
-                if (status == TextToSpeech.SUCCESS) {
-                    int r = tts.setLanguage(Locale.US);
-                    if (r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED) {
-                        ttsReady = true;
-                        ttsBridge.flushPending();
-                    } else {
-                        // 设备未安装英语语音数据：尽量用通用英语兜底；仍缺失则保持不可用（不弹系统界面）。
-                        int r2 = tts.setLanguage(Locale.ENGLISH);
-                        if (r2 != TextToSpeech.LANG_MISSING_DATA && r2 != TextToSpeech.LANG_NOT_SUPPORTED) {
-                            ttsReady = true;
-                            ttsBridge.flushPending();
-                        }
-                    }
+                if (status != TextToSpeech.SUCCESS) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "语音引擎初始化失败，发音不可用", Toast.LENGTH_LONG).show());
+                    return;
+                }
+                int r = tts.setLanguage(Locale.US);
+                if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    // 设备未安装英语语音数据：明确提示用户，并提供跳转安装入口。
+                    ttsReady = false;
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "未安装英语语音包：设置→语言和输入法→文字转语音(TTS)输出→安装语音数据(English)",
+                            Toast.LENGTH_LONG).show());
+                } else {
+                    ttsReady = true;
+                    ttsBridge.flushPending();
                 }
             }
         });
@@ -132,19 +140,46 @@ public class MainActivity extends Activity {
             return tts != null && ttsReady;
         }
 
+        /** 英语语音数据是否缺失（供网页决定是否显示“安装语音包”提示）。 */
+        @JavascriptInterface
+        public boolean needInstall() {
+            return tts != null && !ttsReady;
+        }
+
+        /** 跳转到系统 TTS / 语音数据安装设置页（尽最大努力）。 */
+        @JavascriptInterface
+        public void openSettings() {
+            Intent i = new Intent(TTS_INSTALL_ACTION);
+            if (i.resolveActivity(getPackageManager()) == null) {
+                i = new Intent(Settings.ACTION_SETTINGS);
+            }
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try { startActivity(i); } catch (Exception ignore) {}
+        }
+
+        void promptInstallTtsData() {
+            Intent i = new Intent(TTS_INSTALL_ACTION);
+            if (i.resolveActivity(getPackageManager()) != null) {
+                try { startActivity(i); } catch (Exception ignore) {}
+            }
+        }
+
         @JavascriptInterface
         public void speak(String text) {
             if (text == null || text.isEmpty()) return;
             if (tts == null || !ttsReady) {
-                // 引擎尚未初始化完成：先排队，初始化好后再播（避免首点无声）
-                pending.add(text);
+                // 引擎未就绪或语言缺失：给出明确提示，而不是静默吞掉。
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        tts == null ? "语音引擎未就绪" : "英语语音包未安装，请到设置安装后重试",
+                        Toast.LENGTH_SHORT).show());
+                if (tts == null) pending.add(text);
                 return;
             }
             tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vd_" + System.currentTimeMillis());
         }
 
         void flushPending() {
-            if (tts == null) return;
+            if (tts == null || !ttsReady) return;
             String t;
             while ((t = pending.poll()) != null) {
                 tts.speak(t, TextToSpeech.QUEUE_FLUSH, null, "vd_" + System.currentTimeMillis());
