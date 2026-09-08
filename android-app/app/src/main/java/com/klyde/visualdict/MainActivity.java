@@ -51,6 +51,8 @@ public class MainActivity extends Activity {
     private volatile String activeEngineName = "系统默认";
     // TTS 诊断信息（已检测到的引擎列表），供网页展示，辅助排查“缺什么”
     private volatile String ttsDiag = "";
+    // 每个引擎的初始化/语言支持明细（供 status() 输出，便于平板真机反馈精确信息）
+    private final List<String> ttsLog = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -133,6 +135,7 @@ public class MainActivity extends Activity {
         probeHolder[0] = new TextToSpeech(this, status -> {
             TextToSpeech probe = probeHolder[0];
             List<String> pkgs = new ArrayList<>();
+            ttsLog.clear();
             List<String> labels = new ArrayList<>();
             if (status == TextToSpeech.SUCCESS) {
                 try {
@@ -181,7 +184,6 @@ public class MainActivity extends Activity {
     private void initTtsRecursive(final String[] engines, final int idx, final TextToSpeech prev) {
         if (idx >= engines.length) {
             // 所有引擎尝试完毕：保留最后一个可用实例（优先 eSpeak）作为候选并尽量尝试发音。
-            // eSpeak 的英文多为内置，setLanguage 即便报“缺数据”也常能 speak 出声，故标记 ready。
             tts = prev;
             ttsReady = (prev != null);
             activeEngineName = (prev != null) ? describeEngine(prev) : "无";
@@ -191,40 +193,61 @@ public class MainActivity extends Activity {
                         Toast.LENGTH_LONG).show());
             } else {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "未检测到任何 TTS 引擎：请在平板安装 eSpeak TTS 后重启 App",
+                        "未检测到任何可用 TTS 引擎：请在平板安装 eSpeak TTS 后重启 App",
                         Toast.LENGTH_LONG).show());
             }
             return;
         }
         final String pkg = engines[idx];
+        final boolean isEspeak = pkg != null
+                && (pkg.toLowerCase().contains("reecedunn") || pkg.toLowerCase().contains("espeak"));
         // 用数组持有实例，规避“lambda 在构造期间可能捕获到尚未赋值的局部变量 t”的编译错误
         final TextToSpeech[] holder = new TextToSpeech[1];
         holder[0] = new TextToSpeech(this, status -> {
             TextToSpeech t = holder[0];
+            int r = -99;
+            if (status == TextToSpeech.SUCCESS) {
+                r = t.setLanguage(Locale.US);
+                if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    // en-US 缺失时退而求其次试语言级 en（eSpeak 等常以此通过）
+                    r = t.setLanguage(Locale.ENGLISH);
+                }
+            }
+            // 记录本引擎初始化与语言支持明细，便于平板真机反馈精确信息
+            ttsLog.add((pkg == null ? "系统默认" : pkg)
+                    + " init=" + (status == TextToSpeech.SUCCESS ? "OK" : "FAIL")
+                    + " lang=" + langText(r));
             if (status != TextToSpeech.SUCCESS) {
-                // 该引擎未安装：丢弃并尝试下一个（保留之前可用的回退引擎）
+                // 该引擎初始化失败：丢弃并尝试下一个（保留之前可用的回退引擎）
                 if (prev != null && prev != t) prev.shutdown();
                 initTtsRecursive(engines, idx + 1, prev);
                 return;
             }
-            int r = t.setLanguage(Locale.US);
-            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                // en-US 缺失时退而求其次试语言级 en（eSpeak 等常以此通过）
-                r = t.setLanguage(Locale.ENGLISH);
-            }
-            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                // 仍不支持英文：保留为候选（继续尝试下一个引擎），不立即丢弃
+            // 【关键修复】eSpeak 的英文语音为内置，setLanguage 报“缺数据”常是误报，
+            // 只要初始化成功就直接选用，不再被语言检测误杀；用户在 eSpeak App 内下载完
+            // English 数据后即可正常出声。非 eSpeak 引擎则必须真正支持英文才选用。
+            if (isEspeak || (r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED)) {
                 if (prev != null && prev != t) prev.shutdown();
-                initTtsRecursive(engines, idx + 1, t);
+                tts = t;
+                ttsReady = true;
+                activeEngineName = (pkg == null) ? "系统默认" : pkg;
+                ttsBridge.flushPending();
                 return;
             }
-            // 该引擎支持英文发音：正式选用它（先关掉之前的回退实例）
+            // 非 eSpeak 且不支持英文：保留为候选（继续下一个引擎），不立即丢弃
             if (prev != null && prev != t) prev.shutdown();
-            tts = t;
-            ttsReady = true;
-            activeEngineName = (pkg == null) ? "系统默认" : pkg;
-            ttsBridge.flushPending();
+            initTtsRecursive(engines, idx + 1, t);
         }, pkg);
+    }
+
+    /** 将 setLanguage 的整型返回值转为可读文本，便于状态面板展示。 */
+    private static String langText(int r) {
+        if (r == TextToSpeech.LANG_AVAILABLE
+                || r == TextToSpeech.LANG_COUNTRY_AVAILABLE
+                || r == TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE) return "OK(en)";
+        if (r == TextToSpeech.LANG_MISSING_DATA) return "缺数据";
+        if (r == TextToSpeech.LANG_NOT_SUPPORTED) return "不支持";
+        return (r == -99) ? "未初始化" : ("r=" + r);
     }
 
     private String describeEngine(TextToSpeech t) {
@@ -267,7 +290,26 @@ public class MainActivity extends Activity {
         /** 综合状态（供网页自检面板展示）。 */
         @JavascriptInterface
         public String status() {
-            return "ready=" + (tts != null && ttsReady) + "; engine=" + activeEngineName + "; " + ttsDiag;
+            StringBuilder sb = new StringBuilder();
+            sb.append("ready=").append(tts != null && ttsReady);
+            sb.append("; engine=").append(activeEngineName);
+            sb.append("; ").append(ttsDiag);
+            // 智能提示：检测到 eSpeak 但初始化失败，给出明确的平板侧操作指引
+            boolean sawEspeak = false, espeakOk = false;
+            for (String l : ttsLog) {
+                if (l.contains("reecedunn") || l.contains("espeak")) {
+                    sawEspeak = true;
+                    if (l.contains("init=OK")) espeakOk = true;
+                }
+            }
+            if (sawEspeak && !espeakOk) {
+                sb.append(" | 提示：已安装 eSpeak 但其 TTS 服务初始化失败，请打开 eSpeak TTS App 下载英文语音数据，并在系统“文字转语音输出”设为首选引擎后重启平板");
+            }
+            if (!ttsLog.isEmpty()) {
+                sb.append(" | 明细: ");
+                for (String l : ttsLog) sb.append(l).append("; ");
+            }
+            return sb.toString();
         }
 
         /** 真机自测：直接朗读一句英文，返回结果文案（App 内“测试发音”按钮调用）。 */

@@ -35,6 +35,13 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    // 离线构建环境无法下载 lint 依赖（lint-gradle），关闭 release 的 lint 检查，
+    // 否则 assembleRelease 会卡在 lintVitalAnalyzeRelease。不影响任何运行逻辑与签名。
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
 }
 
 dependencies {
