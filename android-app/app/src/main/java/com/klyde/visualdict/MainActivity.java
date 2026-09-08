@@ -122,9 +122,10 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 初始化原生 TTS：先枚举设备里所有已装的语音引擎，按“讯飞优先 → 其余 → 系统默认”的顺序逐个尝试，
-     * 选第一个“能初始化且支持英文(Locale.US)”的引擎；全部不支持英文时，保留最后一个可用引擎并标记
-     * needInstall，由网页/Toast 引导用户去该引擎App内下载 English 语音，或安装 eSpeak TTS 等离线引擎。
+     * 初始化原生 TTS：先枚举设备里所有已装的语音引擎，按“eSpeak → 讯飞 → Google → 系统默认”的优先级
+     * 逐个尝试，选第一个“能初始化且支持英文(Locale.US，退而求 Locale.ENGLISH)”的引擎。
+     * 即便某些引擎 setLanguage 报“缺数据”，只要实例能创建也尽量保留为候选（eSpeak 的英文通常是
+     * 内置的，设语言失败往往只是检测误报，实际 speak 仍能出声）；最终由网页“测试发音”按钮真机验证。
      */
     private void initTts() {
         // 用一个临时实例枚举已装引擎（getEngines() 需在初始化成功后调用）
@@ -142,15 +143,6 @@ public class MainActivity extends Activity {
                 } catch (Exception ignore) {}
             }
             try { probe.shutdown(); } catch (Exception ignore) {}
-            // 讯飞相关引擎排到最前，其余保持枚举顺序
-            List<String> ordered = new ArrayList<>(pkgs);
-            Collections.sort(ordered, (a, b) -> {
-                boolean ai = a != null && a.contains("iflytek");
-                boolean bi = b != null && b.contains("iflytek");
-                if (ai == bi) return 0;
-                return ai ? -1 : 1;
-            });
-            ordered.add(null); // 系统默认引擎兜底
             // 记录诊断：已检测到哪些引擎
             StringBuilder sb = new StringBuilder();
             sb.append("已检测到 ").append(pkgs.size()).append(" 个语音引擎");
@@ -163,23 +155,43 @@ public class MainActivity extends Activity {
                 sb.append("）");
             }
             ttsDiag = sb.toString();
+            // 候选顺序：eSpeak 最优先，其次讯飞/Google，其余保持，最后系统默认兜底
+            List<String> ordered = new ArrayList<>(pkgs);
+            Collections.sort(ordered, (a, b) -> {
+                int ra = rank(a), rb = rank(b);
+                if (ra != rb) return Integer.compare(ra, rb);
+                return 0;
+            });
+            ordered.add(null); // 系统默认引擎兜底
             initTtsRecursive(ordered.toArray(new String[0]), 0, null);
         });
     }
 
+    /** 引擎优先级（数值越小越优先）：eSpeak > 讯飞 > Google > 三星 > 其它 > 系统默认(null)。 */
+    private int rank(String pkg) {
+        if (pkg == null) return 5;
+        String p = pkg.toLowerCase();
+        if (p.contains("reecedunn") || p.contains("espeak")) return 0; // eSpeak 离线英文最稳
+        if (p.contains("iflytek")) return 1;
+        if (p.contains("google")) return 2;
+        if (p.contains("samsung")) return 3;
+        return 4;
+    }
+
     private void initTtsRecursive(final String[] engines, final int idx, final TextToSpeech prev) {
         if (idx >= engines.length) {
-            // 所有引擎尝试完毕：保留最后一个可用的引擎作为候选，提示安装英文音库
-            ttsReady = false;
-            tts = prev; // 保留实例，便于用户安装语音后重试（speak 会提示“语音包未安装”而非“未就绪”）
+            // 所有引擎尝试完毕：保留最后一个可用实例（优先 eSpeak）作为候选并尽量尝试发音。
+            // eSpeak 的英文多为内置，setLanguage 即便报“缺数据”也常能 speak 出声，故标记 ready。
+            tts = prev;
+            ttsReady = (prev != null);
             activeEngineName = (prev != null) ? describeEngine(prev) : "无";
             if (prev != null) {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "语音引擎已安装但缺少 English 语音数据：请打开该引擎 App（如讯飞语记）下载 English(US) 语音，或在系统“文字转语音输出”里改选其它引擎",
+                        "已选用「" + activeEngineName + "」。如点词仍无声，请打开该引擎 App 确认 English 语音数据已下载；也可点页面右下“测试发音”自检",
                         Toast.LENGTH_LONG).show());
             } else {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "未检测到任何 TTS 引擎：请安装 eSpeak TTS 或 Google 文字转语音引擎后再试",
+                        "未检测到任何 TTS 引擎：请在平板安装 eSpeak TTS 后重启 App",
                         Toast.LENGTH_LONG).show());
             }
             return;
@@ -197,12 +209,16 @@ public class MainActivity extends Activity {
             }
             int r = t.setLanguage(Locale.US);
             if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                // 引擎可用但不含英文音库：保留为候选，继续尝试下一个（也许下一个自带英文）
+                // en-US 缺失时退而求其次试语言级 en（eSpeak 等常以此通过）
+                r = t.setLanguage(Locale.ENGLISH);
+            }
+            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                // 仍不支持英文：保留为候选（继续尝试下一个引擎），不立即丢弃
                 if (prev != null && prev != t) prev.shutdown();
                 initTtsRecursive(engines, idx + 1, t);
                 return;
             }
-            // 该引擎支持英文发音：正式选用它
+            // 该引擎支持英文发音：正式选用它（先关掉之前的回退实例）
             if (prev != null && prev != t) prev.shutdown();
             tts = t;
             ttsReady = true;
@@ -236,7 +252,7 @@ public class MainActivity extends Activity {
             return tts != null && !ttsReady;
         }
 
-        /** 当前选用的语音引擎包名（如 com.iflytek.speechcloud / 系统默认），供网页展示。 */
+        /** 当前选用的语音引擎包名（如 com.reecedunn.espeak / 系统默认），供网页展示。 */
         @JavascriptInterface
         public String engineName() {
             return activeEngineName;
@@ -246,6 +262,26 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String diag() {
             return ttsDiag;
+        }
+
+        /** 综合状态（供网页自检面板展示）。 */
+        @JavascriptInterface
+        public String status() {
+            return "ready=" + (tts != null && ttsReady) + "; engine=" + activeEngineName + "; " + ttsDiag;
+        }
+
+        /** 真机自测：直接朗读一句英文，返回结果文案（App 内“测试发音”按钮调用）。 */
+        @JavascriptInterface
+        public String testSpeak() {
+            if (tts == null) {
+                return "未就绪：" + ttsDiag + "（无可用引擎实例）";
+            }
+            try {
+                tts.speak("This is a test. Hello, eSpeak.", TextToSpeech.QUEUE_FLUSH, null, "vd_test");
+                return "已用「" + activeEngineName + "」发出测试音，请听设备扬声器";
+            } catch (Exception e) {
+                return "发音异常：" + e.getMessage();
+            }
         }
 
         /** 跳转到系统 TTS / 语音数据安装设置页（尽最大努力）。 */
@@ -270,15 +306,20 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void speak(String text) {
             if (text == null || text.isEmpty()) return;
-            if (tts == null || !ttsReady) {
-                // 引擎未就绪或语言缺失：给出明确提示，而不是静默吞掉。
+            if (tts == null) {
+                // 引擎实例都没创建成功：明确提示并缓存，待引擎就绪后重试
                 runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        tts == null ? "语音引擎未就绪" : "英语语音包未安装，请到设置安装后重试",
-                        Toast.LENGTH_SHORT).show());
-                if (tts == null) pending.add(text);
+                        "语音引擎未就绪，请稍候或重启 App", Toast.LENGTH_SHORT).show());
+                pending.add(text);
                 return;
             }
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vd_" + System.currentTimeMillis());
+            // 引擎实例存在就尽量出声（eSpeak 英文常内置，setLanguage 报缺数据也不影响实际朗读）
+            try {
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vd_" + System.currentTimeMillis());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "发音失败：" + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
         }
 
         void flushPending() {
