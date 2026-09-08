@@ -3,6 +3,22 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- 【关键修复】Android 11+(API30+) 包可见性：不声明 <queries> 时 getEngines() 会返回空，
+         即使设备已安装 TTS 引擎（如 eSpeak/RHVoice），App 也“看不见”，导致 0 引擎、发音失败。
+         这里显式声明 TTS 服务 intent + 常见引擎包名，让本 App 能发现并绑定它们。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+            <category android:name="android.intent.category.DEFAULT" />
+        </intent>
+        <package android:name="com.reecedunn.espeak" />
+        <package android:name="com.github.olga_yakovleva.rhvoice.android" />
+        <package android:name="edu.cmu.cs.speech.flite" />
+        <package android:name="com.google.android.tts" />
+        <package android:name="com.iflytek.speechcloud" />
+        <package android:name="com.iflytek.tts" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:label="@string/app_name"

@@ -158,7 +158,23 @@ public class MainActivity extends Activity {
                 sb.append("）");
             }
             ttsDiag = sb.toString();
-            // 候选顺序：eSpeak 最优先，其次讯飞/Google，其余保持，最后系统默认兜底
+            // 【关键修复】Android 11+(API30+) 的「包可见性」会令 getEngines() 返回空，
+            // 即便引擎已安装。这里在枚举不到时，显式补上常见离线英文引擎包名，
+            // 直接按包名绑定（上面 Manifest 的 <queries> 已声明这些包可见）。
+            if (pkgs.isEmpty()) {
+                String[] known = {
+                        "com.reecedunn.espeak",
+                        "com.github.olga_yakovleva.rhvoice.android",
+                        "edu.cmu.cs.speech.flite",
+                        "com.google.android.tts",
+                        "com.iflytek.speechcloud",
+                        "com.iflytek.tts"
+                };
+                for (String k : known) {
+                    if (!pkgs.contains(k)) pkgs.add(k);
+                }
+            }
+            // 候选顺序：eSpeak 最优先，其次 RHVoice/Flite/讯飞/Google，最后系统默认兜底
             List<String> ordered = new ArrayList<>(pkgs);
             Collections.sort(ordered, (a, b) -> {
                 int ra = rank(a), rb = rank(b);
@@ -172,13 +188,28 @@ public class MainActivity extends Activity {
 
     /** 引擎优先级（数值越小越优先）：eSpeak > 讯飞 > Google > 三星 > 其它 > 系统默认(null)。 */
     private int rank(String pkg) {
-        if (pkg == null) return 5;
+        if (pkg == null) return 6;
         String p = pkg.toLowerCase();
-        if (p.contains("reecedunn") || p.contains("espeak")) return 0; // eSpeak 离线英文最稳
-        if (p.contains("iflytek")) return 1;
-        if (p.contains("google")) return 2;
-        if (p.contains("samsung")) return 3;
-        return 4;
+        if (p.contains("reecedunn") || p.contains("espeak")) return 0;   // eSpeak 离线英文内置
+        if (p.contains("rhvoice") || p.contains("flite")) return 1;     // RHVoice/Flite 现代离线英文引擎
+        if (p.contains("iflytek")) return 2;
+        if (p.contains("google")) return 3;
+        if (p.contains("samsung")) return 4;
+        return 5;
+    }
+
+    /** 包名是否属于“内置英文、离线可用”的 TTS 引擎（eSpeak/RHVoice/Flite）。 */
+    private static boolean isBuiltinEnglish(String pkg) {
+        if (pkg == null) return false;
+        String p = pkg.toLowerCase();
+        return p.contains("reecedunn") || p.contains("espeak")
+                || p.contains("rhvoice") || p.contains("flite");
+    }
+
+    /** ttsLog 行是否描述某个离线英文引擎。 */
+    private static boolean logLineIsBuiltinEnglish(String l) {
+        return l.contains("reecedunn") || l.contains("espeak")
+                || l.contains("rhvoice") || l.contains("flite");
     }
 
     private void initTtsRecursive(final String[] engines, final int idx, final TextToSpeech prev) {
@@ -193,14 +224,13 @@ public class MainActivity extends Activity {
                         Toast.LENGTH_LONG).show());
             } else {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "未检测到任何可用 TTS 引擎：请在平板安装 eSpeak TTS 后重启 App",
+                        "未检测到任何可用 TTS 引擎：请在平板安装 eSpeak 或 RHVoice TTS 后重启 App",
                         Toast.LENGTH_LONG).show());
             }
             return;
         }
         final String pkg = engines[idx];
-        final boolean isEspeak = pkg != null
-                && (pkg.toLowerCase().contains("reecedunn") || pkg.toLowerCase().contains("espeak"));
+        final boolean isBuiltinEnglish = isBuiltinEnglish(pkg);
         // 用数组持有实例，规避“lambda 在构造期间可能捕获到尚未赋值的局部变量 t”的编译错误
         final TextToSpeech[] holder = new TextToSpeech[1];
         holder[0] = new TextToSpeech(this, status -> {
@@ -223,10 +253,10 @@ public class MainActivity extends Activity {
                 initTtsRecursive(engines, idx + 1, prev);
                 return;
             }
-            // 【关键修复】eSpeak 的英文语音为内置，setLanguage 报“缺数据”常是误报，
-            // 只要初始化成功就直接选用，不再被语言检测误杀；用户在 eSpeak App 内下载完
-            // English 数据后即可正常出声。非 eSpeak 引擎则必须真正支持英文才选用。
-            if (isEspeak || (r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED)) {
+            // 【关键修复】eSpeak/RHVoice/Flite 的英文语音为内置，setLanguage 报“缺数据”常是误报，
+            // 只要初始化成功就直接选用，不再被语言检测误杀；用户在对应引擎 App 内下载完
+            // English 数据后即可正常出声。其它引擎则必须真正支持英文才选用。
+            if (isBuiltinEnglish || (r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED)) {
                 if (prev != null && prev != t) prev.shutdown();
                 tts = t;
                 ttsReady = true;
@@ -273,9 +303,9 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean needInstall() {
             if (tts != null && !ttsReady) return true;
-            // eSpeak 已安装但 TTS 服务初始化失败：同样需要用户去下载英文数据并设为首选引擎
+            // 离线英文引擎已安装但 TTS 服务初始化失败：同样需要用户去下载英文数据并设为首选引擎
             for (String l : ttsLog) {
-                if ((l.contains("reecedunn") || l.contains("espeak")) && l.contains("init=FAIL")) {
+                if (logLineIsBuiltinEnglish(l) && l.contains("init=FAIL")) {
                     return true;
                 }
             }
@@ -301,16 +331,16 @@ public class MainActivity extends Activity {
             sb.append("ready=").append(tts != null && ttsReady);
             sb.append("; engine=").append(activeEngineName);
             sb.append("; ").append(ttsDiag);
-            // 智能提示：检测到 eSpeak 但初始化失败，给出明确的平板侧操作指引
-            boolean sawEspeak = false, espeakOk = false;
+            // 智能提示：检测到离线英文引擎（eSpeak/RHVoice/Flite）但初始化失败，给出操作指引
+            boolean sawBuiltin = false, builtinOk = false;
             for (String l : ttsLog) {
-                if (l.contains("reecedunn") || l.contains("espeak")) {
-                    sawEspeak = true;
-                    if (l.contains("init=OK")) espeakOk = true;
+                if (logLineIsBuiltinEnglish(l)) {
+                    sawBuiltin = true;
+                    if (l.contains("init=OK")) builtinOk = true;
                 }
             }
-            if (sawEspeak && !espeakOk) {
-                sb.append(" | 提示：已安装 eSpeak 但其 TTS 服务初始化失败，请打开 eSpeak TTS App 下载英文语音数据，并在系统“文字转语音输出”设为首选引擎后重启平板");
+            if (sawBuiltin && !builtinOk) {
+                sb.append(" | 提示：已安装离线英文引擎(eSpeak/RHVoice)但其 TTS 服务初始化失败，请打开该引擎 App 下载 English 语音数据、在系统“文字转语音输出”设为首选引擎并重启平板；若仍失败建议改用 RHVoice TTS（更兼容新系统）");
             }
             if (!ttsLog.isEmpty()) {
                 sb.append(" | 明细: ");
@@ -323,14 +353,14 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String testSpeak() {
             if (tts == null) {
-                boolean espeakFail = false;
+                boolean builtinFail = false;
                 for (String l : ttsLog) {
-                    if ((l.contains("reecedunn") || l.contains("espeak")) && l.contains("init=FAIL")) {
-                        espeakFail = true;
+                    if (logLineIsBuiltinEnglish(l) && l.contains("init=FAIL")) {
+                        builtinFail = true;
                     }
                 }
-                if (espeakFail) {
-                    return "未就绪：已安装 eSpeak 但其 TTS 服务初始化失败，请打开 eSpeak TTS App 下载英文语音数据、在系统“文字转语音输出”设为首选引擎后重启平板，再点测试";
+                if (builtinFail) {
+                    return "未就绪：已安装离线英文引擎(eSpeak/RHVoice)但其 TTS 服务初始化失败，请打开该引擎 App 下载 English 语音数据、在系统“文字转语音输出”设为首选引擎后重启平板，再点测试；若仍失败建议改用 RHVoice TTS";
                 }
                 return "未就绪：" + ttsDiag + "（无可用引擎实例，请安装 eSpeak TTS 后重启 App）";
             }
