@@ -346,6 +346,7 @@ render(0);
   if (btn) btn.onclick = function(){
     var r = (window.AndroidTTS && typeof window.AndroidTTS.testSpeak==='function') ? window.AndroidTTS.testSpeak() : '当前环境不支持原生 TTS';
     var el = document.getElementById('ttsStatus'); if(el) el.textContent = 'TTS: ' + r;
+    if (window.AndroidTTS && typeof window.AndroidTTS.needInstall==='function' && window.AndroidTTS.needInstall()) showTtsHint();
   };
   setTimeout(refreshTtsStatus, 800);
   setInterval(refreshTtsStatus, 3000);

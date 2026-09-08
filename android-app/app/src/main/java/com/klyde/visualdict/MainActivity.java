@@ -269,10 +269,17 @@ public class MainActivity extends Activity {
             return tts != null && ttsReady;
         }
 
-        /** 英语语音数据是否缺失（供网页决定是否显示“安装语音包”提示）。 */
+        /** 是否需要引导用户安装/启用语音引擎（eSpeak 已装但初始化失败也归为此类）。 */
         @JavascriptInterface
         public boolean needInstall() {
-            return tts != null && !ttsReady;
+            if (tts != null && !ttsReady) return true;
+            // eSpeak 已安装但 TTS 服务初始化失败：同样需要用户去下载英文数据并设为首选引擎
+            for (String l : ttsLog) {
+                if ((l.contains("reecedunn") || l.contains("espeak")) && l.contains("init=FAIL")) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /** 当前选用的语音引擎包名（如 com.reecedunn.espeak / 系统默认），供网页展示。 */
@@ -316,7 +323,16 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String testSpeak() {
             if (tts == null) {
-                return "未就绪：" + ttsDiag + "（无可用引擎实例）";
+                boolean espeakFail = false;
+                for (String l : ttsLog) {
+                    if ((l.contains("reecedunn") || l.contains("espeak")) && l.contains("init=FAIL")) {
+                        espeakFail = true;
+                    }
+                }
+                if (espeakFail) {
+                    return "未就绪：已安装 eSpeak 但其 TTS 服务初始化失败，请打开 eSpeak TTS App 下载英文语音数据、在系统“文字转语音输出”设为首选引擎后重启平板，再点测试";
+                }
+                return "未就绪：" + ttsDiag + "（无可用引擎实例，请安装 eSpeak TTS 后重启 App）";
             }
             try {
                 tts.speak("This is a test. Hello, eSpeak.", TextToSpeech.QUEUE_FLUSH, null, "vd_test");
