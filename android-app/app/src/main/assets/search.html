@@ -25,6 +25,7 @@
   .ipa { font-size:14px; color:#b3261e; font-weight:600; margin-left:8px; display:inline; vertical-align:baseline; }
   .ipa.approx { color:#1565c0; }
   .zh { font-size:14px; color:#5a6b85; margin-top:2px; }
+  .ex { font-size:12px; color:#7a88a0; margin-top:3px; font-style:italic; line-height:1.4; }
   .ab { flex:none; width:38px; height:38px; border-radius:50%; border:none; font-size:17px; cursor:pointer; background:#e8f0fe; color:#1565c0; }
   .ab.view { background:#e6f4ea; color:#2e7d32; }
   .ab.fav { background:#fff4e0; color:#f0a020; font-size:20px; }
@@ -214,6 +215,7 @@
   html.dark .ipa { color:#ff7a72; }
   html.dark .ipa.approx { color:#6db1ff; }
   html.dark .zh { color:#9fb0c8; }
+  html.dark .ex { color:#9fb0c8; }
   html.dark .ab { background:#1e3a5f; color:#9cc6ff; }
   html.dark .ab.view { background:#1f4030; color:#7fe0a0; }
   html.dark .ab.fav { background:#3a2e12; color:#ffcf6b; }
@@ -568,6 +570,7 @@
   </div>
 </div>
 <div id="toast"></div>
+<script src="examples.js"></script>
 <script src="words.js"></script>
 <script>
   const list=document.getElementById('list'), cnt=document.getElementById('cnt'), q=document.getElementById('q');
@@ -627,6 +630,7 @@
     main.appendChild(e);
     if(ip){ const p=document.createElement('span'); p.className='ipa'+(a?' approx':''); p.textContent=(a?'≈ ':'')+ip+(a?' （近似）':''); main.appendChild(p); }
     if(zh){ const z=document.createElement('div'); z.className='zh'; z.innerHTML=hl(zh,k); main.appendChild(z); }
+    if(window.EXAMPLES && window.EXAMPLES[en]){ const d=document.createElement('div'); d.className='ex'; d.textContent='💡 '+window.EXAMPLES[en]; main.appendChild(d); }
     it.appendChild(main);
     if(pg>0){ const v=document.createElement('button'); v.className='ab view'; v.textContent='📖'; v.title='在图典中查看'; v.onclick=(ev)=>{ ev.stopPropagation(); location.href='index2.html#'+pg; }; it.appendChild(v); }
     const spk=document.createElement('button'); spk.className='ab'; spk.textContent='🔊'; spk.onclick=(ev)=>{ ev.stopPropagation(); speak(en); }; it.appendChild(spk);
@@ -1936,27 +1940,6 @@
   }
   updateThemeChip();
 </script>
-<!-- TTS 自检面板：平板点此直接测试发音，无需联网 -->
-<div id="ttsPanel" style="position:fixed;right:10px;bottom:10px;z-index:9998;display:flex;flex-direction:column;gap:6px;align-items:flex-end;font-size:12px;">
-  <div id="ttsStatus" style="background:rgba(0,0,0,.6);color:#fff;padding:4px 8px;border-radius:8px;max-width:62vw;line-height:1.4;"></div>
-  <button id="ttsTest" style="border:none;background:#1565c0;color:#fff;padding:10px 14px;border-radius:24px;font-weight:bold;box-shadow:0 4px 10px rgba(0,0,0,.3);">🔊 测试发音</button>
-</div>
-<script>
-(function(){
-  function refreshTtsStatus(){
-    try {
-      var s = (window.AndroidTTS && typeof window.AndroidTTS.status==='function') ? window.AndroidTTS.status() : '（非安卓环境）';
-      var el = document.getElementById('ttsStatus'); if(el) el.textContent = 'TTS: ' + s;
-    } catch(e){}
-  }
-  var btn = document.getElementById('ttsTest');
-  if (btn) btn.onclick = function(){
-    var r = (window.AndroidTTS && typeof window.AndroidTTS.testSpeak==='function') ? window.AndroidTTS.testSpeak() : '当前环境不支持原生 TTS';
-    var el = document.getElementById('ttsStatus'); if(el) el.textContent = 'TTS: ' + r;
-  };
-  setTimeout(refreshTtsStatus, 800);
-  setInterval(refreshTtsStatus, 3000);
-})();
-</script>
+
 </body>
 </html>

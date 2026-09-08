@@ -61,6 +61,7 @@
   .word-popup .ph b { font-weight: 700; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .word-popup .ph .ipa { color: #b3261e; font-size: 12px; margin-left: 6px; }
   .word-popup .ph .ipa.approx { color: #5da6f0; }
+  .word-popup .ex { padding:6px 8px 2px; font-size:12px; color:#9aa0a6; font-style:italic; line-height:1.4; word-break:break-word; }
   .word-popup .ph .x { background: none; border: none; color: #9aa0a6; font-size: 16px; cursor: pointer; padding: 0 4px; }
   .word-popup button.act { display: block; width: 100%; text-align: left; background: none; border: none;
                             color: #e8eaed; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 14px; }
@@ -164,6 +165,7 @@ function updateFavBtn(){
 /* ---------- render ---------- */
 function render(idx){
   cur = Math.max(0, Math.min(PAGES.length - 1, idx));
+  try{ localStorage.setItem('vd_lastPage', String(cur)); }catch(e){}
   const p = PAGES[cur];
   img.src = p.img;
   overlay.innerHTML = '';
@@ -225,6 +227,7 @@ function showWordPopup(el, word){
   wordPopup.innerHTML =
     '<div class="ph"><span><b>'+escAttr(word)+'</b>'+(ipa?' <span class="ipa'+(approx?' approx':'')+'">'+escAttr(ipa)+'</span>':'')+'</span>'+
     '<button class="x" onclick="hideWordPopup()">✕</button></div>'+
+    (window.EXAMPLES && window.EXAMPLES[word] ? '<div class="ex">💡 '+escAttr(window.EXAMPLES[word])+'</div>' : '')+
     '<button class="act" onclick="popupSpeak(\''+escAttr(word)+'\')">🔊 朗读</button>'+
     '<button class="act" onclick="popupToggleFav(\''+escAttr(word)+'\')">'+(isFav?'★ 已收藏（点移除）':'☆ 收藏到生词本')+'</button>'+
     '<button class="act" onclick="popupSearch(\''+escAttr(word)+'\')">🔍 在词库中查</button>';
@@ -315,7 +318,8 @@ function flash(term){
   });
 }
 
-render(0);
+const __savedPage = parseInt(localStorage.getItem('vd_lastPage')||'', 10);
+render((!isNaN(__savedPage) && __savedPage>=0 && __savedPage<PAGES.length) ? __savedPage : 0);
 
 /* 支持从搜索页按 #原书页号 跳转，如 index2.html#15 */
 (function(){
@@ -329,28 +333,7 @@ render(0);
   }
 })();
 </script>
-<!-- TTS 自检面板：平板点此直接测试发音，无需联网 -->
-<div id="ttsPanel" style="position:fixed;right:10px;bottom:10px;z-index:9998;display:flex;flex-direction:column;gap:6px;align-items:flex-end;font-size:12px;">
-  <div id="ttsStatus" style="background:rgba(0,0,0,.6);color:#fff;padding:4px 8px;border-radius:8px;max-width:62vw;line-height:1.4;"></div>
-  <button id="ttsTest" style="border:none;background:#1565c0;color:#fff;padding:10px 14px;border-radius:24px;font-weight:bold;box-shadow:0 4px 10px rgba(0,0,0,.3);">🔊 测试发音</button>
-</div>
-<script>
-(function(){
-  function refreshTtsStatus(){
-    try {
-      var s = (window.AndroidTTS && typeof window.AndroidTTS.status==='function') ? window.AndroidTTS.status() : '（非安卓环境）';
-      var el = document.getElementById('ttsStatus'); if(el) el.textContent = 'TTS: ' + s;
-    } catch(e){}
-  }
-  var btn = document.getElementById('ttsTest');
-  if (btn) btn.onclick = function(){
-    var r = (window.AndroidTTS && typeof window.AndroidTTS.testSpeak==='function') ? window.AndroidTTS.testSpeak() : '当前环境不支持原生 TTS';
-    var el = document.getElementById('ttsStatus'); if(el) el.textContent = 'TTS: ' + r;
-    if (window.AndroidTTS && typeof window.AndroidTTS.needInstall==='function' && window.AndroidTTS.needInstall()) showTtsHint();
-  };
-  setTimeout(refreshTtsStatus, 800);
-  setInterval(refreshTtsStatus, 3000);
-})();
-</script>
+
+<script src="examples.js"></script>
 </body>
 </html>
