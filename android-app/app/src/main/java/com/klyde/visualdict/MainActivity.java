@@ -186,12 +186,12 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** 引擎优先级（数值越小越优先）：eSpeak > 讯飞 > Google > 三星 > 其它 > 系统默认(null)。 */
+    /** 引擎优先级（数值越小越优先）：RHVoice/Flite > eSpeak > 讯飞 > Google > 三星 > 其它 > 系统默认(null)。 */
     private int rank(String pkg) {
         if (pkg == null) return 6;
         String p = pkg.toLowerCase();
-        if (p.contains("reecedunn") || p.contains("espeak")) return 0;   // eSpeak 离线英文内置
-        if (p.contains("rhvoice") || p.contains("flite")) return 1;     // RHVoice/Flite 现代离线英文引擎
+        if (p.contains("rhvoice") || p.contains("flite")) return 0;     // 首选：人声录制片段，清晰自然
+        if (p.contains("reecedunn") || p.contains("espeak")) return 1;   // 兜底：2017 旧版共振峰合成，机械音
         if (p.contains("iflytek")) return 2;
         if (p.contains("google")) return 3;
         if (p.contains("samsung")) return 4;
@@ -365,7 +365,7 @@ public class MainActivity extends Activity {
                 return "未就绪：" + ttsDiag + "（无可用引擎实例，请安装 eSpeak TTS 后重启 App）";
             }
             try {
-                tts.speak("This is a test. Hello, eSpeak.", TextToSpeech.QUEUE_FLUSH, null, "vd_test");
+                speakWithMediaStream(tts, "This is a test. Hello, eSpeak.", "vd_test");
                 return "已用「" + activeEngineName + "」发出测试音，请听设备扬声器";
             } catch (Exception e) {
                 return "发音异常：" + e.getMessage();
@@ -403,18 +403,25 @@ public class MainActivity extends Activity {
             }
             // 引擎实例存在就尽量出声（eSpeak 英文常内置，setLanguage 报缺数据也不影响实际朗读）
             try {
-                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vd_" + System.currentTimeMillis());
+                speakWithMediaStream(tts, text, "vd_" + System.currentTimeMillis());
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this,
                         "发音失败：" + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
         }
 
+        /** 用媒体流发声（兼容 4 参 speak）：确保走扬声器、避免路由到听筒/蓝牙导致听不清或音量小。 */
+        private static void speakWithMediaStream(TextToSpeech tts, String text, String utteranceId) {
+            Bundle params = new Bundle();
+            params.putString(TextToSpeech.Engine.KEY_PARAM_STREAM, "STREAM_MUSIC");
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId);
+        }
+
         void flushPending() {
             if (tts == null || !ttsReady) return;
             String t;
             while ((t = pending.poll()) != null) {
-                tts.speak(t, TextToSpeech.QUEUE_FLUSH, null, "vd_" + System.currentTimeMillis());
+                speakWithMediaStream(tts, t, "vd_" + System.currentTimeMillis());
             }
         }
     }
